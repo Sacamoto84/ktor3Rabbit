@@ -1,0 +1,79 @@
+package com.example
+
+import com.amazonaws.HttpMethod
+import com.amazonaws.auth.AWSStaticCredentialsProvider
+import com.amazonaws.auth.BasicAWSCredentials
+import com.amazonaws.client.builder.AwsClientBuilder
+import com.amazonaws.services.s3.AmazonS3ClientBuilder
+import com.amazonaws.services.s3.model.ListObjectsV2Request
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.util.*
+
+
+//Host	cellar-c2.services.clever-cloud.com
+//Key ID	WVPFE18CVWFMUIXHS30I
+//Key Secret	gyPm81FECjcCnnvrW1NS6IJ8ck6AAky58fKuyi9r
+
+class S3Client(
+    private val region: String,
+    private val bucketName: String,
+    private val awsAccessKey: String,
+    private val awsSecretKey: String
+) {
+
+    private val endpoint = "cellar-c2.services.clever-cloud.com"
+
+    private val client = AmazonS3ClientBuilder
+        .standard()
+        .withPathStyleAccessEnabled(true)
+        .withEndpointConfiguration(getEndpointConfiguration())
+        .withCredentials(getCredentialsProvider())
+        .build()
+
+    fun listAllKeys(maxKeys: Int? = null, continuationToken: String? = null): Pair<String?, List<S3Data>> {
+        val req = if (continuationToken.isNullOrBlank()) {
+            ListObjectsV2Request().withBucketName(bucketName).withMaxKeys(maxKeys ?: 10)
+        } else {
+            ListObjectsV2Request().withBucketName(bucketName).withMaxKeys(maxKeys ?: 10)
+                .withContinuationToken(continuationToken)
+        }
+        val keyList = mutableListOf<S3Data>()
+        val listObjectResponse = client.listObjectsV2(req)
+        listObjectResponse.objectSummaries.forEach {
+            keyList.add(
+                S3Data(
+                    it.key,
+                    client.generatePresignedUrl(
+                        bucketName,
+                        it.key,
+                        Date.from(LocalDateTime.now().plusSeconds(901L).atZone(ZoneId.systemDefault()).toInstant()),
+                        HttpMethod.GET
+                    ).toString(),
+                    it.size.toString().toDouble() / 1000.0,
+                    it.lastModified.toString()
+                )
+            )
+        }
+        return Pair(listObjectResponse.nextContinuationToken, keyList)
+    }
+
+    private fun getEndpointConfiguration(): AwsClientBuilder.EndpointConfiguration {
+        return AwsClientBuilder.EndpointConfiguration(endpoint, region)
+    }
+
+    private fun getCredentialsProvider() =
+        AWSStaticCredentialsProvider(
+            BasicAWSCredentials(
+                awsAccessKey,
+                awsSecretKey
+            )
+        )
+}
+
+data class S3Data(
+    val key: String,
+    val downloadUrl: String,
+    val size: Double,
+    val lastModifiedAt: String
+)
